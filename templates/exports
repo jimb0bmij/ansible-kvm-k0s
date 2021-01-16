@@ -1,0 +1,2 @@
+/home/k0sdata *(rw,all_squash,anonuid=1003,anongid=1003)
+/var/export/vol1 *(rw,all_squash,anonuid=1001,anongid=1001)

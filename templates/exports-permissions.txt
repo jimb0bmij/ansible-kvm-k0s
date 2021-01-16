@@ -1,0 +1,5 @@
+/var/export/vol1
+drwx------. 19 emby emby 4096 Jan 13 23:23 data
+drwxrwxrwx. 3 emby emby 18 Jan 13 23:22 vol1
+drwxr-xr-x.  3 root root   18 Jan 10 22:39 export
+emby uid and gid = 1001

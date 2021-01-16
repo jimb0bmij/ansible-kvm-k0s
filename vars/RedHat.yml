@@ -1,0 +1,4 @@
+---
+# for vars/RedHat.yml
+nfstuff: nfs-utils
+epel: epel-release

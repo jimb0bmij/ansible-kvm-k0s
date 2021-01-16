@@ -1,0 +1,130 @@
+---
+- hosts: all 
+#  connection: local           
+
+  gather_facts: true         
+
+  vars:
+    cloudimage: "CentOS-7-x86_64-GenericCloud-2009.qcow2"
+    cloudimageurl: "https://cloud.centos.org/centos/7/images/"
+    #cloudimage: "bionic-server-cloudimg-amd64.img"
+    #cloudimageurl: "https://cloud-images.ubuntu.com/bionic/current/"
+    virtimagepath: virt/images
+    virtvmspath: virt/vms
+#    userid: "{{ lookup('env', 'USER') }}"
+    userid: "{{ ansible_env.USER }}"
+    userhome: "{{ ansible_env.HOME }}"
+
+  environment:
+    KUBECONFIG: "{{ userhome }}/.k0s/kubeconfig"
+    
+  vars_files:
+    - [ "vars/{{ ansible_facts['os_family'] }}.yml", "vars/os_defaults.yml" ]
+
+  tasks:
+
+    - include_vars: name_vars.yml
+    - include_vars: vmspecs.yml
+
+#    - debug:
+##        msg: "{{ lookup('vars', item) }}"
+#        msg: "{{ item }}"
+#      loop: "{{ ansible_facts.services.keys() | select('match', '^.*dock.*$') | list }}"
+
+    - name: list all VMs
+      virt:
+        command: list_vms
+#        uri: 'qemu:///session'
+      register: all_vms
+
+
+    - name: gather facts on existing virsh pool
+      virt_pool:
+        command: facts
+        uri: 'qemu:///session'
+      register: virtp 
+
+    - name: list only running VMs
+      virt:
+        command: list_vms
+        state: running
+      register: running_vms
+
+    - name: Check cloud image
+      uri: 
+        url: "{{ cloudimageurl }}{{ cloudimage }}"
+        method: HEAD
+      register: cloudimg_http_stat
+      check_mode: no 
+
+    - name: qemu images directory 
+      file: 
+        state: directory 
+        path: "{{ virtimagepath }}"
+
+    - name: Check local cloud image 
+      stat: 
+        path: "{{ virtimagepath }}/{{ cloudimage}}"
+        get_checksum: no 
+      register: cloudimg_local_stat 
+    
+    - name: Update cloud image
+      get_url:
+        url: "{{ cloudimageurl }}{{ cloudimage }}"
+        dest: "{{ virtimagepath }}/{{ cloudimage }}"
+      when: not cloudimg_local_stat.stat.exists or 
+            cloudimg_local_stat.stat.size != cloudimg_http_stat.content_length
+      register: cloudimg_local_updated 
+    
+ #   - name: Convert cloud image qcow format 
+ #     shell: 
+ #       chdir: "{{ virtimagepath }}"
+ #       cmd: "qemu-img convert -f qcow2 {{ cloudimage }} {{ (( cloudimage | splitext)[:-1] | join('.')) }}.qcow2"
+ #       creates: "{{ (( cloudimage | splitext)[:-1] | join('.')) }}.qcow2"
+ #     when: cloudimg_local_updated.changed|bool
+
+    - name: Virtual machine directory 
+      file: 
+        path: "{{ virtvmspath }}"
+        state: directory 
+#        owner: root
+#        group: root
+#        mode: 0755
+ 
+    - name: Configure Virtual Machines
+      include_tasks: vm.yml
+      loop: "{{ virtual_machines }}"
+      loop_control: 
+        loop_var: vm
+      args:
+        apply:
+          become: yes
+
+    - name: Configure Virtual Machines with K0s
+      include_tasks: vm-k0s.yml
+      loop: "{{ virtual_machines }}"
+      loop_control: 
+        loop_var: vm
+      args:
+        apply:
+          delegate_to: "{{ vm.net.ip }}"
+
+    - name: Configure AWX on K0s
+      include_tasks: awx-k0s.yml
+      loop: "{{ virtual_machines }}"
+      loop_control: 
+        loop_var: vm
+      args:
+        apply:
+          delegate_to: "{{ vm.net.ip }}"
+      when: vm.controller
+
+    - debug:
+        msg: 
+         - "{{ all_vms }}"
+         - "{{ running_vms }}"
+         - "{{ cloudimg_http_stat }}"
+#         - "{{ virtp }}"
+
+
+

@@ -1,0 +1,62 @@
+---
+virtual_machines:
+  - name: jimb016
+    cpu: 2
+    mem: 4096
+    disk: 15G
+    bridge: br1
+    net: 
+      ip: 192.168.0.16
+      netmask: 255.255.255.0
+      broadcast: 192.168.0.255
+      gateway: 192.168.0.1
+      domain: jimb0.net
+      dns: 
+        - 192.168.0.1
+        - 1.1.1.1
+    controller: true
+  - name: jimb017
+    cpu: 2
+    mem: 4096
+    disk: 15G
+    bridge: br1
+    net: 
+      ip: 192.168.0.17
+      netmask: 255.255.255.0
+      broadcast: 192.168.0.255
+      gateway: 192.168.0.1
+      domain: jimb0.net
+      dns: 
+        - 192.168.0.1
+        - 1.1.1.1
+    controller: false
+  - name: jimb018
+    cpu: 2
+    mem: 4096
+    disk: 15G
+    bridge: br1
+    net: 
+      ip: 192.168.0.18
+      netmask: 255.255.255.0
+      broadcast: 192.168.0.255
+      gateway: 192.168.0.1
+      domain: jimb0.net
+      dns: 
+        - 192.168.0.1
+        - 1.1.1.1
+    controller: false
+  - name: jimb019
+    cpu: 2
+    mem: 4096
+    disk: 15G
+    bridge: br1
+    net: 
+      ip: 192.168.0.19
+      netmask: 255.255.255.0
+      broadcast: 192.168.0.255
+      gateway: 192.168.0.1
+      domain: jimb0.net
+      dns: 
+        - 192.168.0.1
+        - 1.1.1.1
+    controller: false

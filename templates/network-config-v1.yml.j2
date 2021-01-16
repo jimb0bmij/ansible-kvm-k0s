@@ -1,0 +1,15 @@
+{% if vm.net is defined %}
+network-interfaces: |
+  auto lo
+  iface lo inet loopback
+
+  auto eth0
+  iface eth0 inet static
+    address {{ vm.net.ip }}
+    netmask {{ vm.net.netmask }}
+    gateway {{ vm.net.gateway }}
+    broadcast {{ vm.net.broadcast }}
+    dns-nameservers {{ vm.net.dns | regex_replace("\[", "") | regex_replace("'", "") | regex_replace("u", "") | regex_replace(",", "")| regex_replace("\]", "") }} 
+    dns-search {{ vm.net.domain }} 
+{% else %}
+{% endif %}

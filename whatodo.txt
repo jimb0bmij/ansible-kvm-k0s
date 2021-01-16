@@ -1,0 +1,2 @@
+ansible-playbook ansible-k0s-kvm.yml -i 192.168.0.5, -K
+ansible-playbook ansible-k0s-kvm.yml -i 192.168.0.5, --vault-password-file .vault -e@vault.yml

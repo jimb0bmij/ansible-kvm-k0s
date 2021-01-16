@@ -1,0 +1,235 @@
+- name: "{{ vm.name }} has started and connection via ssh"
+  wait_for:
+    host: "{{ vm.net.ip }}"
+    port: 22
+    state: started
+    delay: 5
+    timeout: 300
+    search_regex: OpenSSH
+  connection: local  
+
+- name: "{{ vm.name }} install base tools"
+  package:
+    name:
+      - screen
+      - bash-completion
+      - make
+      - python3
+      - git
+      - curl
+      - net-tools
+      - "{{ nfstuff }}"
+      - wget
+      - unzip
+      - "{{ epel|default(omit) }}"
+      - libselinux-python3
+  become: yes
+
+- name: "{{ vm.name }} install ansible"
+  package:
+    name: ansible
+    state: latest
+  become: yes
+  when: vm.controller
+
+#- name: Check status of service
+#  service_facts:
+#  register: service_state
+#  
+#- debug:
+#    var: service_state.ansible_facts.services["k0s.service"].state
+
+- name: configure k0s
+  block:
+    - name: "{{ vm.name }} Creates k0s directory"
+      file:
+        path: "{{ userhome }}/.k0s"
+        state: directory
+    
+    - name: "{{ vm.name }} Download k0s"
+      get_url:
+        url: https://get.k0s.sh
+        dest: "{{ userhome }}/k0s.sh"
+        owner: "{{ userid }}"
+      delegate_to: 127.0.0.1
+
+    - name: "install k0s"
+      shell: "chmod 700 {{ userhome }}/k0s.sh && {{ userhome }}/k0s.sh"
+      args:
+        creates: /usr/bin/k0s
+      become: yes
+      delegate_to: 127.0.0.1
+    
+    - name: "{{ vm.name }} Download helm"
+      get_url:
+        url: https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
+        dest: "{{ userhome }}/get_helm.sh"
+        owner: "{{ userid }}"
+      delegate_to: 127.0.0.1
+
+    - name: "{{ vm.name }} copy installers k0s and helm"
+      copy: 
+        src: "{{ userhome }}/{{ item }}"
+        dest: "{{ userhome }}"
+        mode: 0755
+      loop:
+        - k0s.sh
+        - get_helm.sh
+
+    - name: "{{ vm.name }} install k0s"
+      shell: "{{ userhome }}/k0s.sh"
+        #- 'curl -sSLf https://get.k0s.sh | sudo sh'
+      args:
+        creates: /usr/bin/k0s
+      become: yes
+
+    - name: "{{ vm.name }} install helm"
+      shell: "{{ userhome }}/get_helm.sh"
+      environment:
+        PATH: "{{ ansible_env.PATH }}:/usr/local/bin"
+      args:
+        creates: /usr/local/bin/helm
+      become: yes
+
+    - name: "{{ vm.name }} add bash completion to bashrc"
+      lineinfile:
+        path: "{{ userhome }}/.bashrc"
+        line: "{{ item }}"
+      with_items:
+        - source <(/usr/bin/k0s completion bash)
+        - source <(/usr/local/bin/kubectl completion bash)
+       
+    - name: "{{ vm.name }} install kubectl"
+      shell: "{{ item }}"
+      with_items:
+        - 'curl --output /usr/local/bin/kubectl -L "https://storage.googleapis.com/kubernetes-release/release/$(curl -s https://storage.googleapis.com/kubernetes-release/release/stable.txt)/bin/linux/amd64/kubectl"'
+        #- 'install /usr/local/sbin/kubectl /usr/local/bin/kubectl'
+        #- export KUBECONFIG="${HOME}/.k0s/kubeconfig"
+      args:
+        creates: /usr/local/bin/kubectl
+        warn: false
+      become: yes
+    
+    - name: "{{ vm.name }} file with permissions for kubectl"
+      file:
+        path: /usr/local/bin/kubectl
+        mode: 0775
+      become: yes
+
+    - name: config controller
+      block:
+        - name: "{{ vm.name }} create default-config k0s on controller"
+          shell: "{{ item }}"
+          with_items:
+            - "k0s default-config | tee {{ userhome }}/.k0s/k0s.yaml"
+          args:
+            creates: "{{ userhome }}/.k0s/k0s.yaml"
+        
+        - name: "{{ vm.name }} create server node service"
+          shell: "k0s install -c {{ userhome }}/.k0s/k0s.yaml"
+          become: yes
+        
+        - name: "{{ vm.name }} start service k0s on controller"
+          systemd:
+            name: k0s
+            state: started
+            daemon_reload: yes
+          become: yes
+        
+        - name: "{{ vm.name }} create token for worker node"
+          shell: 'k0s token create --role=worker'
+          register: workertoken
+          until: workertoken is not failed
+          retries: 10
+          become: yes
+        
+        - name: "{{ vm.name }} set fact for token"
+          set_fact:
+            tokenworker: "{{ workertoken.stdout }}"
+       
+        - name: "{{ vm.name }} Get k0s admin.conf contents"
+          slurp:
+            src: /var/lib/k0s/pki/admin.conf
+          register: adminconf
+          become: yes
+        
+        - name: "{{ vm.name }} set fact for admin.conf"
+          set_fact:
+            confadmin: "{{ adminconf.content | b64decode }}"
+   
+        - name: "{{ vm.name }} set fact for controller ip"
+          set_fact:
+            controllerip: "{{ vm.net.ip }}"
+      when: vm.controller
+
+    - name: "{{ vm.name }} create worker node service"
+      shell: "k0s install --role worker -c {{ userhome }}/.k0s/k0s.yaml"
+      become: yes
+      when: not vm.controller
+
+
+    - name: "{{ vm.name }} Creating kubeconfig file"
+      copy:
+        dest: "~/.k0s/kubeconfig"
+        content: "{{ confadmin }}"
+        mode: 0600
+
+    - name: "Creating kubeconfig file"
+      copy:
+        dest: "~/.kube/kubeconfig"
+        content: "{{ confadmin }}"
+        mode: 0600
+      delegate_to: 127.0.0.1
+
+    - name: "update kubeconfig with controller ip"
+      replace:
+        path: "~/.kube/kubeconfig"
+        regexp: 'localhost'
+        replace: "{{ controllerip }}"
+      delegate_to: 127.0.0.1
+
+    - name: "{{ vm.name }} update kubeconfig with controller ip"
+      replace:
+        path: "~/.k0s/kubeconfig"
+        regexp: 'localhost'
+        replace: "{{ controllerip }}"
+      when: not vm.controller
+    
+    - name: "{{ vm.name }} populate /etc/profile.d/sh.local"
+      lineinfile:
+        dest: "/etc/profile.d/sh.local"
+        state: present
+        line: 'export KUBECONFIG="{{ userhome }}/.k0s/kubeconfig"'
+      become: yes
+    
+    - name: "{{ vm.name }} create file token.txt"
+      copy:
+        content: "{{ tokenworker }}"
+        dest: /root/token.txt
+        mode: 0555
+      become: yes
+    
+        
+    - name: "{{ vm.name }} insert systemd service file with location of worker token"
+      replace:
+        path: /etc/systemd/system/k0s.service
+        regexp: 'REPLACEME'
+        replace: "/root/token.txt"
+      become: yes
+      when: not vm.controller
+    
+    
+    - name: "{{ vm.name }} enable and start k0s service"
+      systemd:
+        name: k0s
+        daemon_reload: yes
+        enabled: yes
+        state: started
+      become: yes
+    
+    - debug:
+        msg: 
+         - "{{ workertoken }}"
+        verbosity: 2
+    
+  #when: service_state.ansible_facts.services["k0s.service"].state is not defined  

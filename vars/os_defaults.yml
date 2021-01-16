@@ -1,0 +1,3 @@
+---
+# for vars/os_defaults.yml
+nfstuff: nfs-common

@@ -1,0 +1,144 @@
+- debug:
+    msg: 
+      - "{{ ansible_user_id }}"
+      - "{{ virtual_machines | list | last }}"
+      - "{{ virtual_machines | map(attribute='name') | list | last }}"
+      - "{{ virtual_machines | map(attribute='net.domain') | list | last }}"
+
+- set_fact:
+    lastone: "{{ virtual_machines | map(attribute='name') | list | last }}.{{ virtual_machines | map(attribute='net.domain') | list | last }}   Ready"
+
+- debug:
+    msg: "{{ lastone }}"
+
+- name: "{{ vm.name }} pods ready"
+  #shell: 'kubectl config view'
+  shell: 'kubectl get nodes'
+  register: nodes
+  until: lastone in nodes.stdout
+  #until: (lastone + ".jimb0.net   Ready") in nodes.stdout
+  retries: 600
+  delay: 10
+  environment:
+    PATH: "{{ ansible_env.PATH }}:/usr/local/sbin"
+  
+- debug:
+    msg: 
+      - "{{ nodes }}"
+      - "{{ nodes.stdout }}"
+  
+#- name: "{{ vm.name }} configure for AWX"
+#  shell: "{{ item }}"
+#  with_items:
+#    - 'kubectl create namespace awx'
+#    - 'kubectl create role ansible-role --namespace=awx --verb=create --verb=get --verb=list --verb=update --verb=delete --resource=pods -o yaml --dry-run=client  > role.yaml'
+#    - 'kubectl create -f role.yaml'
+#    - 'kubectl describe role -n awx ansible-role'
+#    - 'kubectl create rolebinding ansible-rolebinding --role=ansible-role --user=ansible -n awx'
+#    - 'kubectl describe rolebindings.rbac.authorization.k8s.io -n awx ansible-rolebinding'
+#  environment:
+#    PATH: "{{ ansible_env.PATH }}:/usr/local/sbin"
+#  when: "'Ready' in nodes.stdout"
+#  ignore_errors: true
+
+- name: "{{ vm.name }} get AWX installer via git"
+  git:
+    repo: https://github.com/ansible/awx.git
+    dest: "{{ userhome }}/awx"
+
+- name: "{{ vm.name }} create files for AWX storage"
+  template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+  loop:
+    - { src: 'persistentVolume_k0sdata.yml', dest: "{{ userhome }}/persistentVolume_k0sdata.yml" }
+#    - { src: 'postgrespvc.yml', dest: "{{ userhome }}/postgrespvc.yml" }
+
+- name: "{{ vm.name }} replace kube defaults in installer"
+  replace:
+    path: "{{ item.path }}"
+    regexp: "{{ item.regexp1 }}"
+    replace: "{{ item.replace }}"
+  with_items:
+    - { path: '{{ userhome }}/awx/installer/roles/kubernetes/defaults/main.yml', regexp1: 'web_mem_request: 1', replace: 'web_mem_request: 0'}
+    - { path: '{{ userhome }}/awx/installer/roles/kubernetes/defaults/main.yml', regexp1: 'web_cpu_request: 500', replace: 'web_cpu_request: 0'}
+    - { path: '{{ userhome }}/awx/installer/roles/kubernetes/defaults/main.yml', regexp1: 'task_mem_request: 2', replace: 'task_mem_request: 0'}
+    - { path: '{{ userhome }}/awx/installer/roles/kubernetes/defaults/main.yml', regexp1: 'task_cpu_request: 1500', replace: 'task_cpu_request: 0'}
+    - { path: '{{ userhome }}/awx/installer/roles/kubernetes/defaults/main.yml', regexp1: 'redis_mem_request: 2', replace: 'redis_mem_request: 0'}
+    - { path: '{{ userhome }}/awx/installer/roles/kubernetes/defaults/main.yml', regexp1: 'redis_cpu_request: 500', replace: 'redis_cpu_request: 0'}
+    - { path: '{{ userhome }}/awx/installer/roles/kubernetes/defaults/main.yml', regexp1: 'postgress_activate_wait: 60', replace: 'postgress_activate_wait: 120'}
+    - { path: '{{ userhome }}/awx/installer/inventory', regexp1: '# kubernetes_context=test-cluster', replace: 'kubernetes_context=Default'}
+    - { path: '{{ userhome }}/awx/installer/inventory', regexp1: '# kubernetes_namespace=awx', replace: 'kubernetes_namespace=default'}
+    - { path: '{{ userhome }}/awx/installer/inventory', regexp1: '# kubernetes_web_svc_type=NodePort', replace: 'kubernetes_web_svc_type=NodePort'}
+    - { path: '{{ userhome }}/awx/installer/inventory', regexp1: '# pg_serviceaccount=awx', replace: 'pg_serviceaccount=awx'}
+    - { path: '{{ userhome }}/awx/installer/inventory', regexp1: '# pg_volume_capacity=5', replace: 'pg_volume_capacity=5'}
+    - { path: '{{ userhome }}/awx/installer/inventory', regexp1: '# pg_persistence_storageClass=StorageClassName', replace: 'pg_persistence_storageClass=dbstorageclass'}
+
+- name: "{{ vm.name }} add delay for database"
+  blockinfile:
+    path: '{{ userhome }}/awx/installer/roles/kubernetes/tasks/main.yml'
+    insertbefore: "- name: Migrate database"
+    block: |
+      
+      - pause:
+          seconds: 120
+
+    backup: yes
+
+- name: "{{ vm.name }} configure storage for AWX"
+  shell: "{{ item }}"
+  with_items:
+    - 'kubectl delete -f persistentVolume_k0sdata.yml'
+    - 'kubectl create -f persistentVolume_k0sdata.yml'
+  environment:
+    PATH: "{{ ansible_env.PATH }}:/usr/local/sbin"
+  when: "'Ready' in nodes.stdout"
+  ignore_errors: true
+
+- name: "{{ vm.name }} start install for AWX"
+  shell: "{{ item }}"
+  args:
+    chdir: "{{ userhome }}/awx/installer"
+  with_items:
+    - "ansible-playbook -i inventory install.yml"
+    #- "screen -S AWX -d -m -- sh -c 'ansible-playbook -i inventory install.yml; exec $SHELL'"
+    
+
+# kubectl get pvc |grep awx| cut -f1 -d ' '
+# 
+
+- name: "{{ vm.name }} AWX cli"
+  pip:
+    name: awxkit
+    executable: pip3
+  become: yes
+
+  #pip3 install --user https://releases.ansible.com/ansible-tower/cli/ansible-tower-cli-latest.tar.gz
+
+
+- name: "{{ vm.name }} AWX web service ready"
+  shell: 'kubectl describe service awx-web-svc'
+  register: awxwebsvc
+  until: "'awx-web-svc' in awxwebsvc.stdout"
+  retries: 900
+  delay: 10
+  environment:
+    PATH: "{{ ansible_env.PATH }}:/usr/local/sbin"
+
+- set_fact:
+    hostipweb: "http://{{ virtual_machines | map(attribute='net.ip') | list | last }}:{{ awxwebsvc.stdout_lines[11].split('/')[0].split(' ')[-1] }}"
+
+- debug:
+    msg:
+      - "{{ awxwebsvc.stdout_lines}}"
+      - "{{ awxwebsvc.stdout_lines[11].split('/')[0].split(' ')[-1] }}"
+
+- name: Access AWX
+  debug:
+    msg: 
+      - "Point your brower to this link {{ hostipweb }}"
+      - "ssh into control node {{ vm.name }} and run this: awx -k --conf.password password --conf.username admin --conf.host {{ hostipweb }} user list"
+
+
+
+

@@ -1,0 +1,12 @@
+---
+# ./vars/name_vars.yml
+
+#The passwd and pub_key parameters take your hashed password and your SSH public key so that you are able to access the server after provisioning.
+#To generate a new password hash, use mkpasswd -m sha-512 -R 2048 (Included in the whois package).
+
+
+users: 
+  - name: jimb0
+    full_name: jimb0 
+    passwd: $6$rounds=2048$av
+    pub_key: ssh-rsa AAAAB3N

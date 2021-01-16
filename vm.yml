@@ -1,0 +1,133 @@
+# ------------------------------------------------------------------------------ Check if VM exists 
+# -------------------------------------------------------------------------------------------------
+
+- name: "{{ vm.name }} :: VM storage location "
+  file: 
+    state: directory 
+    path: "{{ virtvmspath }}/{{ vm.name }}"
+
+- name:  "{{ vm.name }} :: copy-on-write image"
+  stat: 
+    path: "{{ virtvmspath }}/{{ vm.name }}/{{ vm.name }}.qcow2"
+    get_checksum: no 
+  register: vm_stat
+
+# ------------------------------------------------------------------------------ Generate kick-off 
+# -------------------------------------------------------------------------------------------------
+
+- name: "{{ vm.name }} :: cloud-config file"
+  template: 
+    src: templates/cloud-config.yml.j2
+    dest: "{{ virtvmspath }}/{{ vm.name }}/cloud-config.yml"
+  when: vm_stat.stat.exists == false 
+
+- name: "{{ vm.name }} :: network metadata file"
+  template: 
+    src: templates/network-config-v1.yml.j2
+    dest: "{{ virtvmspath }}/{{ vm.name }}/network-config-v1.yml"
+  when: vm_stat.stat.exists == false 
+
+- name: "{{ vm.name }} :: cloud-config image "
+  shell: 
+    creates: "{{ virtvmspath }}/{{ vm.name }}/cloud-config.img"
+    cmd: >-
+      cloud-localds 
+      {{ virtvmspath }}/{{ vm.name }}/cloud-config.img 
+      {{ virtvmspath }}/{{ vm.name }}/cloud-config.yml
+      {{ virtvmspath }}/{{ vm.name }}/network-config-v1.yml
+  when: vm_stat.stat.exists == false  
+
+
+# ------------------------------------------------------------------------ Configure and launch VM
+# -------------------------------------------------------------------------------------------------
+
+- name: "{{ vm.name }} :: Provision Virtual Machine disk  "
+  copy: 
+    src: "{{ virtimagepath }}/{{ cloudimage }}"
+    dest: "{{ virtvmspath }}/{{ vm.name }}/{{ vm.name }}.qcow2"
+    remote_src: true 
+  when: vm_stat.stat.exists == false 
+
+- name: "{{ vm.name }} :: Resize Virtual Machine disk "
+  shell: 
+    cmd: qemu-img resize {{ virtvmspath }}/{{ vm.name }}/{{ vm.name }}.qcow2 {{ vm.disk|default('10G') }}
+  when: vm_stat.stat.exists == false 
+
+- name: "{{ vm.name }} :: Create virtual machine "
+  shell: 
+    cmd: >- 
+        virt-install 
+        --noautoconsole
+        --name {{ vm.name }}
+        --memory {{ vm.mem|default('512') }}
+        --vcpus  {{ vm.cpu|default('1') }}
+        --disk {{ virtvmspath }}/{{ vm.name }}/{{ vm.name }}.qcow2,device=disk,bus=virtio 
+        --disk {{ virtvmspath }}/{{ vm.name }}/cloud-config.img,device=cdrom 
+        --os-type linux 
+        --os-variant rhel7
+        --virt-type kvm 
+        --graphics none 
+        --network bridge={{ vm.bridge|default('default') }},model=virtio 
+        --import
+  when: vm_stat.stat.exists == false 
+
+
+# ------------------------------------------------------------------------ Set VM Autostartup 
+# -------------------------------------------------------------------------------------------------
+
+- name: "{{ vm.name }} start with host startup"
+  virt: 
+    name: "{{ vm.name }}"
+    autostart: false
+
+- name: "{{ vm.name }} has started and connection via ssh"
+  wait_for:
+    host: "{{ vm.net.ip }}"
+    port: 22
+    state: started
+    delay: 30
+    timeout: 300
+    search_regex: OpenSSH
+  connection: local     
+
+- name: "{{ vm.name }} eject ISO"
+  shell: "virsh --connect qemu:///system change-media {{ vm.name }} hda --eject --config"
+  ignore_errors: true
+
+- pause:
+    seconds: 30
+
+- name: Check status of service
+  service_facts:
+  register: service_state
+  delegate_to: "{{ vm.net.ip }}"
+
+- debug:
+    var: service_state.ansible_facts.services["k0s.service"].state
+
+- name: check if k0s already installed
+  block:
+    - name: "{{ vm.name }} shutdown"
+      virt: 
+        name: "{{ vm.name }}"
+        state: shutdown
+    
+    - name: "{{ vm.name }} status"
+      virt: 
+        name: "{{ vm.name }}"
+        command: status
+      register: vmstatus
+      until: "'shutdown' in vmstatus.status"
+      retries: 60
+    
+    - name: "{{ vm.name }} start"
+      virt: 
+        name: "{{ vm.name }}"
+        command: start
+      when: "'shutdown' in vmstatus.status"
+
+  when: service_state.ansible_facts.services["k0s.service"].state is not defined
+
+
+#    xml: "{{ lookup('template', 'unmountcdrom.xml.j2') }}"
+ 
