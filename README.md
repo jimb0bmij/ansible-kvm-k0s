@@ -26,3 +26,7 @@ You will need to create a vault file (vault.yml) have in the file 'ansible_becom
 You will need to rename 'name_vars_example.yml' to 'name_vars.yml' and update the data for 'full_name:', 'passwd:' and 'pub_key:'.
 
 note: There are some debug statements that don't really need to be display. I like to see scrolling data.
+
+I used this link as a semi guide https://www.linuxsysadmins.com/install-ansible-awx-on-kubernetes/ and https://blog.exxactcorp.com/deploying-dynamic-nfs-provisioning-in-kubernetes/
+
+I did this project to help others as I have been helped from people on the internet. I just asked if you use/share this code you give credit as due. Also I'm open to improvements of the code I posted.
