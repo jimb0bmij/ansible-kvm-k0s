@@ -20,7 +20,7 @@ https://www.ansible.com/
 ![Persistenet Volume Claim for AWX](pvc.png)
 ![Services in Kube](services.png)
 
-You will need to setup a NFS server for postgres. You can see the examples in the template dir (exports and exports-permissions.txt).
+You will need to setup a NFS server for postgresql. You can see the examples in the template dir (exports and exports-permissions.txt).
 
 You will need to create a vault file (vault.yml) have in the file 'ansible_become_password: "yourpassowrd"'.
 You will need to rename 'name_vars_example.yml' to 'name_vars.yml' and update the data for 'full_name:', 'passwd:' and 'pub_key:'.
