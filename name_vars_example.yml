@@ -3,7 +3,7 @@
 
 #The passwd and pub_key parameters take your hashed password and your SSH public key so that you are able to access the server after provisioning.
 #To generate a new password hash, use mkpasswd -m sha-512 -R 2048 (Included in the whois package).
-
+#To generate public key, use ssh-keygen -o.
 
 users: 
   - name: jimb0
